@@ -286,7 +286,7 @@ fi
 # Avoid moving build for CI, because build is in the right place already.
 if [ ! "$BUILD_DIR" = "/app" ]; then
   topic "Making build artifacts available to app"
-  mv $APP_PREFIX $BUILD_DIR/$KONG_RUNTIME
+  cp -r $APP_PREFIX $BUILD_DIR/$KONG_RUNTIME
 fi
 
 # run kong post-build if available
