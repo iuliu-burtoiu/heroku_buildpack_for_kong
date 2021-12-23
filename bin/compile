@@ -27,13 +27,9 @@ BP_CACHE_DIR="$CACHE_DIR/heroku-kong-buildpack"
 mkdir -p $BP_CACHE_DIR
 PREFIX_CACHE_DIR=$BP_CACHE_DIR/app_prefix
 
-IS_CUSTOM_BUILD=false
-RUNTIME_ARCHIVE_URL="${KONG_RUNTIME_ARCHIVE_URL:-https://riskmethodscdn.s3.amazonaws.com/kong/kong-runtime-v2.0.3.tgz}"
-
 # Source for Kong
 if [ -f "${ENV_DIR}/KONG_GIT_URL" ]
 then
-  IS_CUSTOM_BUILD=false
   KONG_GIT_URL=`cat ${ENV_DIR}/KONG_GIT_URL`
 else
   KONG_GIT_URL="https://github.com/kong/kong.git"
@@ -41,7 +37,6 @@ fi
 # commit or tag to checkout
 if [ -f "${ENV_DIR}/KONG_GIT_COMMITISH" ]
 then
-  IS_CUSTOM_BUILD=true
   KONG_GIT_COMMITISH=`cat ${ENV_DIR}/KONG_GIT_COMMITISH`
 else
   KONG_GIT_COMMITISH="2.0.3"
@@ -138,136 +133,131 @@ export LUA_CPATH="$BUILD_DIR/lib/?.so;$BUILD_DIR/.luarocks/lib/lua/5.1/?.so;$APP
 #give environment to later buildpacks
 export | grep -E -e ' (PATH|LD_LIBRARY_PATH|LIBRARY_PATH|INCLUDE_PATH|CPATH|CPPPATH|PKG_CONFIG_PATH)='  > "$BP_DIR/export"
 
-if [ $IS_CUSTOM_BUILD = false ]
+# Proceed with build from source
+# Build from source to have dyno-compatible path prefix
+
+# Cache the build
+VENDOR_CACHE_DIR=${BP_CACHE_DIR}/vendor
+mkdir -p ${VENDOR_CACHE_DIR}
+
+# Detect changes in the vendor/ sources
+topic "Detecting changes in vendor/"
+cd ${VENDOR_DIR}
+VENDOR_DIFF=${BP_CACHE_DIR}/.vendor-diff
+VENDOR_HASH=${BP_CACHE_DIR}/.vendor-hash
+VENDOR_HASH_NEW=${VENDOR_HASH}-new
+touch ${VENDOR_DIFF}
+touch ${VENDOR_HASH}
+touch ${VENDOR_HASH_NEW}
+openssl dgst -sha1 * > ${VENDOR_HASH_NEW}
+# `diff` signals differences with exit codes. Don't fail fast.
+set +e
+diff ${VENDOR_HASH} ${VENDOR_HASH_NEW} > ${VENDOR_DIFF}
+DIFF_STATUS=$?
+set -e
+mv -f ${VENDOR_HASH_NEW} ${VENDOR_HASH}
+
+if [ "$DIFF_STATUS" == 0 ] && [ -d "$PREFIX_CACHE_DIR" ]
 then
-  topic "Installing Kong for buildpack from ${RUNTIME_ARCHIVE_URL}"
-  curl --silent --location "${RUNTIME_ARCHIVE_URL}" | tar xzm -C "${APP_PREFIX}" --strip-components=2
+  topic "Restoring from cache"
+  cp -R $PREFIX_CACHE_DIR/* $APP_PREFIX/
+
+elif [ "$DIFF_STATUS" == 0 ] || [ "$DIFF_STATUS" == 1 ]
+then
+  topic "Changes detected"
+  IFS=$'\n'
+  for DIFF_LINE in $(cat "$VENDOR_DIFF"); do
+    echo "       $DIFF_LINE"
+  done
+  unset IFS
+
+  # Clean-up previous cache
+  rm ${VENDOR_DIFF}
+  rm -rf ${VENDOR_CACHE_DIR}
+  # and cache the new source code
+  mv ${VENDOR_DIR} ${VENDOR_CACHE_DIR}
+  cd ${VENDOR_CACHE_DIR}
+
+  topic "Building OpenSSL"
+  openssl_name="openssl-${OPENSSL_VERSION}"
+  mkdir -p "${openssl_name}"
+  tar -xz -f "${openssl_name}.tar.gz" -C "${openssl_name}" --strip-components=1
+  cd "${openssl_name}"
+  ./config --prefix=$APP_PREFIX -fPIC
+  make
+  make install
+  cd ..
+
+  topic "Building OpenResty"
+  tar -xf openresty-${OPENRESTY_VERSION}.tar.gz
+  cd openresty-${OPENRESTY_VERSION}
+  ./configure --prefix=$APP_PREFIX --with-pcre-jit --with-http_realip_module --with-http_ssl_module --with-http_stub_status_module --with-http_v2_module --with-openssl=${VENDOR_CACHE_DIR}/openssl-${OPENSSL_VERSION}
+
+  make
+  make install
+  cd ..
+
+
+  topic "Building LuaRocks"
+  tar -xf luarocks-${LUAROCKS_VERSION}.tar.gz
+  cd luarocks-${LUAROCKS_VERSION}
+  ./configure --prefix=${APP_PREFIX} --lua-suffix=jit --with-lua=${APP_PREFIX}/luajit --with-lua-include=${APP_PREFIX}/luajit/include/luajit-2.1
+  make build
+  make install
+  cd ..
+
+
+  topic "Caching build"
+  mkdir -p $PREFIX_CACHE_DIR
+  cp -Rf $APP_PREFIX/* $PREFIX_CACHE_DIR/
+
 else
-  # Proceed with build from source
-  # Build from source to have dyno-compatible path prefix
-
-  # Cache the build
-  VENDOR_CACHE_DIR=${BP_CACHE_DIR}/vendor
-  mkdir -p ${VENDOR_CACHE_DIR}
-
-  # Detect changes in the vendor/ sources
-  topic "Detecting changes in vendor/"
-  cd ${VENDOR_DIR}
-  VENDOR_DIFF=${BP_CACHE_DIR}/.vendor-diff
-  VENDOR_HASH=${BP_CACHE_DIR}/.vendor-hash
-  VENDOR_HASH_NEW=${VENDOR_HASH}-new
-  touch ${VENDOR_DIFF}
-  touch ${VENDOR_HASH}
-  touch ${VENDOR_HASH_NEW}
-  openssl dgst -sha1 * > ${VENDOR_HASH_NEW}
-  # `diff` signals differences with exit codes. Don't fail fast.
-  set +e
-  diff ${VENDOR_HASH} ${VENDOR_HASH_NEW} > ${VENDOR_DIFF}
-  DIFF_STATUS=$?
-  set -e
-  mv -f ${VENDOR_HASH_NEW} ${VENDOR_HASH}
-
-  if [ "$DIFF_STATUS" == 0 ] && [ -d "$PREFIX_CACHE_DIR" ]
-  then
-    topic "Restoring from cache"
-    cp -R $PREFIX_CACHE_DIR/* $APP_PREFIX/
-
-  elif [ "$DIFF_STATUS" == 0 ] || [ "$DIFF_STATUS" == 1 ]
-  then
-    topic "Changes detected"
-    IFS=$'\n'
-    for DIFF_LINE in $(cat "$VENDOR_DIFF"); do
-      echo "       $DIFF_LINE"
-    done
-    unset IFS
-
-    # Clean-up previous cache
-    rm ${VENDOR_DIFF}
-    rm -rf ${VENDOR_CACHE_DIR}
-    # and cache the new source code
-    mv ${VENDOR_DIR} ${VENDOR_CACHE_DIR}
-    cd ${VENDOR_CACHE_DIR}
-
-    topic "Building OpenSSL"
-    openssl_name="openssl-${OPENSSL_VERSION}"
-    mkdir -p "${openssl_name}"
-    tar -xz -f "${openssl_name}.tar.gz" -C "${openssl_name}" --strip-components=1
-    cd "${openssl_name}"
-    ./config --prefix=$APP_PREFIX -fPIC
-    make
-    make install
-    cd ..
-
-    topic "Building OpenResty"
-    tar -xf openresty-${OPENRESTY_VERSION}.tar.gz
-    cd openresty-${OPENRESTY_VERSION}
-    ./configure --prefix=$APP_PREFIX --with-pcre-jit --with-http_realip_module --with-http_ssl_module --with-http_stub_status_module --with-http_v2_module --with-openssl=${VENDOR_CACHE_DIR}/openssl-${OPENSSL_VERSION}
-
-    make
-    make install
-    cd ..
-
-
-    topic "Building LuaRocks"
-    tar -xf luarocks-${LUAROCKS_VERSION}.tar.gz
-    cd luarocks-${LUAROCKS_VERSION}
-    ./configure --prefix=${APP_PREFIX} --lua-suffix=jit --with-lua=${APP_PREFIX}/luajit --with-lua-include=${APP_PREFIX}/luajit/include/luajit-2.1
-    make build
-    make install
-    cd ..
-
-
-    topic "Caching build"
-    mkdir -p $PREFIX_CACHE_DIR
-    cp -Rf $APP_PREFIX/* $PREFIX_CACHE_DIR/
-
-  else
-    error "Error detecting cached build: diff exited ${DIFF_STATUS}"
-  fi
-
-  topic "Building Kong from ${KONG_GIT_URL}#${KONG_GIT_COMMITISH}"
-  # Move the unfortunately named `.luarocks` spec file so that it doesn't
-  # interfere during CI. We're migrating Kong apps to use `Rockfile` instead.
-  if [ -f "$BUILD_DIR/.luarocks" ]; then
-    mv "$BUILD_DIR/.luarocks" "$BUILD_DIR/Rockfile"
-  fi
-  # Ensure we don't have Kong from a previous build
-  luarocks remove kong || true
-  if [ -d "$KONG_SOURCE_DIR" ]
-  then
-    cd $KONG_SOURCE_DIR
-    git fetch
-    git fetch --tags
-    git reset --hard $(git rev-list -n 1 $KONG_GIT_COMMITISH)
-  else
-    git clone $KONG_GIT_URL $KONG_SOURCE_DIR
-    cd $KONG_SOURCE_DIR
-    git checkout $KONG_GIT_COMMITISH
-  fi
-  export OPENSSL_DIR=${APP_PREFIX}
-  # Install Kong itself from the cloned git repo
-  luarocks make ./kong-*.rockspec
-  # Install Kong's dependencies via LuaRocks
-  # (`--local` is required for this to do anything)
-  luarocks install --local ./kong-*.rockspec
-  mkdir -p ${APP_PREFIX}/bin
-  mv bin/* ${APP_PREFIX}/bin/
-
-  RESTY_KONG_TLS_VERSION=0.0.6
-  RESTY_KONG_TLS_GITHUB_URI=https://raw.githubusercontent.com/Kong/lua-kong-nginx-module
-  RESTY_KONG_TLS_FILE_URI=$RESTY_KONG_TLS_GITHUB_URI/$RESTY_KONG_TLS_VERSION/lualib/resty/kong/tls.lua
-  LUAROCKS_SHARE=/app/kong-runtime/share/lua/5.1
-  mkdir -p $LUAROCKS_SHARE/resty/kong
-  curl -sSL $RESTY_KONG_TLS_FILE_URI -o $LUAROCKS_SHARE/resty/kong/tls.lua
-
-  topic "Downloading and installing golang"
-  ##download and install golang
-  GO_URL=https://dl.google.com/go/go${GOLANG_VERSION}.linux-amd64.tar.gz
-  curl $GO_URL -o go${GOLANG_VERSION}.linux-amd64.tar.gz
-  tar -xz -f go${GOLANG_VERSION}.linux-amd64.tar.gz -C $APP_PREFIX
-  go get github.com/Kong/go-pluginserver
-  mkdir ${APP_PREFIX}/go-plugins
+  error "Error detecting cached build: diff exited ${DIFF_STATUS}"
 fi
+
+topic "Building Kong from ${KONG_GIT_URL}#${KONG_GIT_COMMITISH}"
+# Move the unfortunately named `.luarocks` spec file so that it doesn't
+# interfere during CI. We're migrating Kong apps to use `Rockfile` instead.
+if [ -f "$BUILD_DIR/.luarocks" ]; then
+  mv "$BUILD_DIR/.luarocks" "$BUILD_DIR/Rockfile"
+fi
+# Ensure we don't have Kong from a previous build
+luarocks remove kong || true
+if [ -d "$KONG_SOURCE_DIR" ]
+then
+  cd $KONG_SOURCE_DIR
+  git fetch
+  git fetch --tags
+  git reset --hard $(git rev-list -n 1 $KONG_GIT_COMMITISH)
+else
+  git clone $KONG_GIT_URL $KONG_SOURCE_DIR
+  cd $KONG_SOURCE_DIR
+  git checkout $KONG_GIT_COMMITISH
+fi
+export OPENSSL_DIR=${APP_PREFIX}
+# Install Kong itself from the cloned git repo
+luarocks make ./kong-*.rockspec
+# Install Kong's dependencies via LuaRocks
+# (`--local` is required for this to do anything)
+luarocks install --local ./kong-*.rockspec
+mkdir -p ${APP_PREFIX}/bin
+mv bin/* ${APP_PREFIX}/bin/
+
+RESTY_KONG_TLS_VERSION=0.0.6
+RESTY_KONG_TLS_GITHUB_URI=https://raw.githubusercontent.com/Kong/lua-kong-nginx-module
+RESTY_KONG_TLS_FILE_URI=$RESTY_KONG_TLS_GITHUB_URI/$RESTY_KONG_TLS_VERSION/lualib/resty/kong/tls.lua
+LUAROCKS_SHARE=/app/kong-runtime/share/lua/5.1
+mkdir -p $LUAROCKS_SHARE/resty/kong
+curl -sSL $RESTY_KONG_TLS_FILE_URI -o $LUAROCKS_SHARE/resty/kong/tls.lua
+
+topic "Downloading and installing golang"
+##download and install golang
+GO_URL=https://dl.google.com/go/go${GOLANG_VERSION}.linux-amd64.tar.gz
+curl $GO_URL -o go${GOLANG_VERSION}.linux-amd64.tar.gz
+tar -xz -f go${GOLANG_VERSION}.linux-amd64.tar.gz -C $APP_PREFIX
+go get github.com/Kong/go-pluginserver
+mkdir ${APP_PREFIX}/go-plugins
+
 
 topic "Installing Lua rocks specified in Rockfile"
 cd ${BUILD_DIR}
