@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# bin/detect <build-dir>
+
+if [ -f $1/config/kong.conf.etlua ]; then
+  echo 'Kong'
+  exit 0
+fi
+
+>&2 echo 'Kong: no config/kong.conf.etlua file found'
+exit 1
