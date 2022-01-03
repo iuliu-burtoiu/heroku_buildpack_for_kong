@@ -295,3 +295,5 @@ if [[ -f $BUILD_DIR/bin/kong-post-build ]]; then
     chmod a+x $BUILD_DIR/bin/kong-post-build
     $BUILD_DIR/bin/kong-post-build $BUILD_DIR
 fi
+
+echo "Buildpack compile success"
