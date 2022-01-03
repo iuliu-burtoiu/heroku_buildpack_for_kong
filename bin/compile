@@ -39,7 +39,7 @@ if [ -f "${ENV_DIR}/KONG_GIT_COMMITISH" ]
 then
   KONG_GIT_COMMITISH=`cat ${ENV_DIR}/KONG_GIT_COMMITISH`
 else
-  KONG_GIT_COMMITISH="2.7.0"
+  KONG_GIT_COMMITISH="2.0.3"
 fi
 
 KONG_SOURCE_DIR="${BP_CACHE_DIR}/kong-source"
@@ -48,7 +48,7 @@ KONG_SOURCE_DIR="${BP_CACHE_DIR}/kong-source"
 # Set dependency versions.
 # These correspond to the archives in `vendor/`.
 # If upgrading any those archives, then update the corresponding version here.
-LUAROCKS_VERSION=3.3.1
+LUAROCKS_VERSION=3.8.0
 OPENSSL_VERSION=1.1.1d
 OPENRESTY_VERSION=1.15.8.3
 GOLANG_VERSION=1.17.5
