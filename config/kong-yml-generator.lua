@@ -6,8 +6,12 @@ local etlua  = require "etlua"
 -- Use shell command arguments to set file locations
 -- first arg: the ETLUA template
 -- second arg: the buildpack/app directory
+
+local rel_config_file = os.getenv("KONG_DECLARATIVE_CONFIG") or "config/kong.yml"
+
 local template_filename = arg[1]
-local config_filename   = arg[2]
+local config_filename   = arg[2].."/"..rel_config_file
+
 
 -- Read environment variables for runtime config
 -- local env_name = os.getenv("ENV_NAME")
