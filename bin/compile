@@ -50,7 +50,7 @@ KONG_SOURCE_DIR="${BP_CACHE_DIR}/kong-source"
 # If upgrading any those archives, then update the corresponding version here.
 LUAROCKS_VERSION=3.8.0
 OPENSSL_VERSION=1.1.1l
-OPENRESTY_VERSION=1.19.9.1
+OPENRESTY_VERSION=1.15.8.3
 GOLANG_VERSION=1.17.5
 
 function error() {
@@ -188,7 +188,7 @@ then
   make install
   cd ..
 
-  topic "Building OpenResty"
+  topic "Building OpenResty ${OPENRESTY_VERSION}"
   tar -xf openresty-${OPENRESTY_VERSION}.tar.gz
   cd openresty-${OPENRESTY_VERSION}
   ./configure --prefix=$APP_PREFIX --with-pcre-jit --with-http_realip_module --with-http_ssl_module --with-http_stub_status_module --with-http_v2_module --with-openssl=${VENDOR_CACHE_DIR}/openssl-${OPENSSL_VERSION}
