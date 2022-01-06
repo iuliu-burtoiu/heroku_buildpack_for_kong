@@ -50,7 +50,7 @@ KONG_SOURCE_DIR="${BP_CACHE_DIR}/kong-source"
 # If upgrading any those archives, then update the corresponding version here.
 LUAROCKS_VERSION=3.8.0
 OPENSSL_VERSION=1.1.1l
-OPENRESTY_VERSION=1.15.8.3
+OPENRESTY_VERSION=1.19.9.1
 GOLANG_VERSION=1.17.5
 
 function error() {
