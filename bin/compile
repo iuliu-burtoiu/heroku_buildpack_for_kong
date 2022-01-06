@@ -159,7 +159,7 @@ mv -f ${VENDOR_HASH_NEW} ${VENDOR_HASH}
 
 if [ "$DIFF_STATUS" == 0 ] && [ -d "$PREFIX_CACHE_DIR" ]
 then
-  topic "Restoring from cache"
+  topic "Restoring from cache $PREFIX_CACHE_DIR to $APP_PREFIX"
   cp -R $PREFIX_CACHE_DIR/* $APP_PREFIX/
 
 elif [ "$DIFF_STATUS" == 0 ] || [ "$DIFF_STATUS" == 1 ]
@@ -220,16 +220,21 @@ topic "Building Kong from ${KONG_GIT_URL}#${KONG_GIT_COMMITISH}"
 # interfere during CI. We're migrating Kong apps to use `Rockfile` instead.
 if [ -f "$BUILD_DIR/.luarocks" ]; then
   mv "$BUILD_DIR/.luarocks" "$BUILD_DIR/Rockfile"
+  echo "Move $BUILD_DIR/.luarocks to $BUILD_DIR/Rockfile" | indent
 fi
 # Ensure we don't have Kong from a previous build
 luarocks remove kong || true
+echo "luaroks removes KONG" | indent
+
 if [ -d "$KONG_SOURCE_DIR" ]
 then
+  echo "Fetch kong  $KONG_GIT_COMMITISH into $KONG_SOURCE_DIR" | indent
   cd $KONG_SOURCE_DIR
   git fetch
   git fetch --tags
   git reset --hard $(git rev-list -n 1 $KONG_GIT_COMMITISH)
 else
+  echo "Clone $KONG_GIT_URL and checkout $KONG_GIT_COMMITISH into $KONG_SOURCE_DIR" | indent
   git clone $KONG_GIT_URL $KONG_SOURCE_DIR
   cd $KONG_SOURCE_DIR
   git checkout $KONG_GIT_COMMITISH
@@ -272,6 +277,8 @@ mv config/* $BUILD_DIR/config
 # Move executables for Procfile into place
 mkdir -p $BUILD_DIR/bin
 cp $BP_DIR/bin/app/heroku-* $BUILD_DIR/bin/
+echo "Runtime available in $BP_DIR" | indent
+ls -R ${BP_DIR}
 
 topic "Applying buildpack v6.0.0 backward-compatibility patch"
 if [ ! -d ".heroku" ]
@@ -286,6 +293,7 @@ fi
 # Avoid moving build for CI, because build is in the right place already.
 if [ ! "$BUILD_DIR" = "/app" ]; then
   topic "Making build artifacts available to app"
+  echo "copy files from $APP_PREFIX to $BUILD_DIR/$KONG_RUNTIME" | indent
   cp -r $APP_PREFIX $BUILD_DIR/$KONG_RUNTIME
 fi
 
