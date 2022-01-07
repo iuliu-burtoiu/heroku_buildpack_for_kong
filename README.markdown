@@ -1,29 +1,25 @@
 ## NOTE
-This is a fork of the original [`heroku-buildpack-kong`](https://github.com/heroku/heroku-buildpack-kong)
+This is based on original work by ['riskmethod'] (https://github.com/riskmethods/heroku-buildpack-kong) which in turn is a fork of the original https://github.com/heroku/heroku-buildpack-kong.
 
-[Heroku Buildpack](https://devcenter.heroku.com/articles/buildpacks) for [Kong](https://getkong.org/about/)
+Steps to patch openresty 1.19.9.1 as well as to apply the lua-kong-nginx-module come from  ['openresty-build-tools'] (https://github.com/Kong/kong-build-tools/tree/master/openresty-build-tools)
+
+[Heroku Buildpack](https://devcenter.heroku.com/articles/buildpacks) for [Kong 2.7.0](https://getkong.org/about/)
 =========================
 
-Deploy [Kong 2.0.3](https://konghq.com) as a Heroku app.
+Deploy [Kong 2.7.0](https://konghq.com) as a Heroku app.
 
-🔬👩‍💻 This software is a community proof-of-concept: [MIT license](LICENSE)
+This software is a community proof-of-concept: [MIT license](LICENSE)
 
 Usage
 -----
 
-⏩ **Deploy the [heroku-kong app](https://github.com/heroku/heroku-kong) to get started.**
+⏩ **Deploy the [heroku-buildpack-for-kong app](https://github.com/iuliu-burtoiu/heroku_buildpack_for_kong) to get started.**
 
 ### Upgrading
 
-Potentially breaking changes are documented in [UPGRADING](UPGRADING.md).
+Potentially breaking changes are documented in [UPGRADING](https://docs.konghq.com/gateway/2.7.x/install-and-run/upgrade-oss/).
 
 ### Custom
-
-While it's possible to use this buildpack directly, you'll be giving up quite a few features of the [heroku-kong app](https://github.com/heroku/heroku-kong):
-
-* Admin API will not be automatically proxied for secure external access
-* Admin Console via `heroku run` will require manual setup
-* local development is not preconfigured
 
 Create a new git repo and Heroku app:
 
@@ -39,15 +35,8 @@ heroku addons:create heroku-postgresql:hobby-dev
 
 Create the file `config/kong.conf.etlua` based on the [sample config file](config/kong.conf.etlua.sample). This is a config template which generates `config/kong.conf` at runtime.
 
-```bash
-git add config/kong.conf.etlua
-
-echo '# Kong Proxy' > README.md
-git add README.md
-
-git commit -m '🐒'
-git push heroku master
-```
+The same must be done with config/kong.yml.etlua and config/nginx.template.sample.
+The  kong.yml generated file, will be needed if declarative / dbless mode is preferred.
 
 🚀 Check `heroku logs` and `heroku open` to verify Kong launches.
 
@@ -74,12 +63,11 @@ git push heroku master
   * Kong itself may be configured with [`KONG_` prefixed variables](https://docs.konghq.com/1.0.x/configuration/#environment-variables)
   * Heroku build configuration:
     * These variables only effect new deployments.
-    * `KONG_RUNTIME_ARCHIVE_URL` location of [pre-compiled Kong runtime archive](DEV.md#pre-compiled-runtime-archive)
-    * ⏱ **Setting these will lengthen build-time, usually 4-8 minutes for compilation from source.** By default, this buildpack downloads pre-compiled, cached Kong binaries to accelerate deployment time. (More details available in [DEV](DEV.md).)
+    * **Setting these will lengthen build-time, usually 4-8 minutes for compilation from source.
     * `KONG_GIT_URL` git repo URL for Kong source
       * default: `https://github.com/kong/kong.git`
     * `KONG_GIT_COMMITISH` git branch/tag/commit for Kong source
-      * default: `2.0.3`
+      * default: `2.7.0`
 
 
 #### Using Environment Variables in Plugins
@@ -103,8 +91,6 @@ This buildpack installs a [release phase](https://devcenter.heroku.com/articles/
 
 Apps can define a custom pre-release script which will be automatically invoked before the built-in release phase script.
 
-Simply commit your executable script to the app's repo as `bin/prerelease`, and then that script will be run for every release. The release will fail if the script exits with non-zero status.
-
 #### Testing
 
 This buildpack supports [Heroku CI](https://devcenter.heroku.com/articles/heroku-ci) to automate test runs and integrate with deployment workflow.
@@ -125,9 +111,8 @@ OpenSSL (version required by OpenResty) is also compiled from source.
 
 ### Modification
 
-This buildpack normally downloads an archive of the pre-compiled Kong runtime, and so skips a very lengthy (~10-minute) build process. To skip that cache speed-up and compile it, set either [`KONG_GIT_URL` or `KONG_GIT_COMMITISH`](#user-content-environment-variables). To create a new archive, see [DEV notes](DEV.md#pre-compiled-runtime-archive).
-
-This buildpack caches its compilation artifacts from the sources in `vendor/`. Changes to the sources in `vendor/` will be detected and the cache ignored.
+This buildpack caches the source files of its compilation artifacts in `vendor/` as compressed tar.gz files.
+Changes to the sources in `vendor/` will be detected and cache will be ignored.
 
 If you need to trigger a full rebuild without changing the source, use the [Heroku Repo CLI plugin](https://github.com/heroku/heroku-repo) to purge the cache:
 

@@ -12,13 +12,14 @@ daemon ${{NGINX_DAEMON}};
 pid pids/nginx.pid;
 error_log ${{PROXY_ERROR_LOG}} ${{LOG_LEVEL}};
 
+
 > if nginx_optimizations then
-worker_rlimit_nofile auto;
+worker_rlimit_nofile 18000;
 > end
 
 events {
 > if nginx_optimizations then
-    worker_connections auto;
+    worker_connections 9000;
     multi_accept on;
 > end
 }
