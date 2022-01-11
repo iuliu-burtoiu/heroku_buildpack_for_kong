@@ -22,37 +22,6 @@ KONG_RUNTIME=kong-runtime
 APP_PREFIX=/app/$KONG_RUNTIME
 mkdir -p $APP_PREFIX
 
-# Cache compilation artifacts between builds
-BP_CACHE_DIR="$CACHE_DIR/heroku-kong-buildpack"
-mkdir -p $BP_CACHE_DIR
-PREFIX_CACHE_DIR=$BP_CACHE_DIR/app_prefix
-
-# Source for Kong
-if [ -f "${ENV_DIR}/KONG_GIT_URL" ]
-then
-  KONG_GIT_URL=`cat ${ENV_DIR}/KONG_GIT_URL`
-else
-  KONG_GIT_URL="https://github.com/kong/kong.git"
-fi
-# commit or tag to checkout
-if [ -f "${ENV_DIR}/KONG_GIT_COMMITISH" ]
-then
-  KONG_GIT_COMMITISH=`cat ${ENV_DIR}/KONG_GIT_COMMITISH`
-else
-  KONG_GIT_COMMITISH="2.7.0"
-fi
-
-KONG_SOURCE_DIR="${BP_CACHE_DIR}/kong-source"
-
-
-# Set dependency versions.
-# These correspond to the archives in `vendor/`.
-# If upgrading any those archives, then update the corresponding version here.
-LUAROCKS_VERSION=3.8.0
-OPENSSL_VERSION=1.1.1l
-OPENRESTY_VERSION=1.19.9.1
-GOLANG_VERSION=1.17.5
-
 function error() {
   echo " !     $*" >&2
   exit 1
@@ -69,37 +38,6 @@ function indent() {
     *)      sed -u "$c";;
   esac
 }
-
-APT_CACHE_DIR="$CACHE_DIR/apt/cache"
-APT_STATE_DIR="$CACHE_DIR/apt/state"
-
-mkdir -p "$APT_CACHE_DIR/archives/partial"
-mkdir -p "$APT_STATE_DIR/lists/partial"
-
-APT_OPTIONS="-o debug::nolocking=true -o dir::cache=$APT_CACHE_DIR -o dir::state=$APT_STATE_DIR"
-
-topic "Updating apt caches"
-apt-get $APT_OPTIONS update | indent
-
-for PACKAGE in $(cat $BP_DIR/Aptfile $BUILD_DIR/Aptfile); do
-  if [[ $PACKAGE == *deb ]]; then
-    PACKAGE_NAME=$(basename $PACKAGE .deb)
-    PACKAGE_FILE=$APT_CACHE_DIR/archives/$PACKAGE_NAME.deb
-
-    topic "Fetching $PACKAGE"
-    curl -s -L -z $PACKAGE_FILE -o $PACKAGE_FILE $PACKAGE 2>&1 | indent
-  else
-    topic "Fetching .debs for $PACKAGE"
-    apt-get $APT_OPTIONS -y --allow-downgrades --allow-remove-essential --allow-change-held-packages -d install --reinstall $PACKAGE | indent
-  fi
-done
-
-mkdir -p $BUILD_DIR/.apt
-
-for DEB in $(ls -1 $APT_CACHE_DIR/archives/*.deb); do
-  topic "Installing $(basename $DEB)"
-  dpkg -x $DEB $BUILD_DIR/.apt/
-done
 
 topic "Writing profile script"
 mkdir -p $BUILD_DIR/.profile.d
@@ -133,140 +71,12 @@ export LUA_CPATH="$BUILD_DIR/lib/?.so;$BUILD_DIR/.luarocks/lib/lua/5.1/?.so;$APP
 #give environment to later buildpacks
 export | grep -E -e ' (PATH|LD_LIBRARY_PATH|LIBRARY_PATH|INCLUDE_PATH|CPATH|CPPPATH|PKG_CONFIG_PATH)='  > "$BP_DIR/export"
 
-# Proceed with build from source
-# Build from source to have dyno-compatible path prefix
 
-# Cache the build
-VENDOR_CACHE_DIR=${BP_CACHE_DIR}/vendor
-mkdir -p ${VENDOR_CACHE_DIR}
+topic "Building with open-resty"
+ls -R
 
-# Detect changes in the vendor/ sources
-topic "Detecting changes in vendor/"
-cd ${VENDOR_DIR}
-VENDOR_DIFF=${BP_CACHE_DIR}/.vendor-diff
-VENDOR_HASH=${BP_CACHE_DIR}/.vendor-hash
-VENDOR_HASH_NEW=${VENDOR_HASH}-new
-touch ${VENDOR_DIFF}
-touch ${VENDOR_HASH}
-touch ${VENDOR_HASH_NEW}
-openssl dgst -sha1 * > ${VENDOR_HASH_NEW}
-# `diff` signals differences with exit codes. Don't fail fast.
-set +e
-diff ${VENDOR_HASH} ${VENDOR_HASH_NEW} > ${VENDOR_DIFF}
-DIFF_STATUS=$?
-set -e
-mv -f ${VENDOR_HASH_NEW} ${VENDOR_HASH}
+./bin/kong-ngx-build -p BUILD_DIR --openresty 1.19.9.1 --openssl 1.1.1m --luarocks 3.8.0 --debug
 
-if [ "$DIFF_STATUS" == 0 ] && [ -d "$PREFIX_CACHE_DIR" ]
-then
-  topic "Restoring from cache $PREFIX_CACHE_DIR to $APP_PREFIX"
-  cp -R $PREFIX_CACHE_DIR/* $APP_PREFIX/
-
-elif [ "$DIFF_STATUS" == 0 ] || [ "$DIFF_STATUS" == 1 ]
-then
-  topic "Changes detected"
-  IFS=$'\n'
-  for DIFF_LINE in $(cat "$VENDOR_DIFF"); do
-    echo "       $DIFF_LINE"
-  done
-  unset IFS
-
-  # Clean-up previous cache
-  rm ${VENDOR_DIFF}
-  rm -rf ${VENDOR_CACHE_DIR}
-  # and cache the new source code
-  mv ${VENDOR_DIR} ${VENDOR_CACHE_DIR}
-  cd ${VENDOR_CACHE_DIR}
-
-  topic "Building OpenSSL"
-  openssl_name="openssl-${OPENSSL_VERSION}"
-  mkdir -p "${openssl_name}"
-  tar -xz -f "${openssl_name}.tar.gz" -C "${openssl_name}" --strip-components=1
-  cd "${openssl_name}"
-  ./config --prefix=$APP_PREFIX -fPIC
-  make
-  make install
-  cd ..
-
-  topic "Building OpenResty ${OPENRESTY_VERSION}"
-  tar -xf openresty-${OPENRESTY_VERSION}.tar.gz
-  cd openresty-${OPENRESTY_VERSION}
-  ./configure --prefix=$APP_PREFIX --with-pcre-jit --with-http_realip_module --with-http_ssl_module --with-http_stub_status_module --with-http_v2_module --with-openssl=${VENDOR_CACHE_DIR}/openssl-${OPENSSL_VERSION}
-
-  make
-  make install
-  cd ..
-
-
-  topic "Building LuaRocks"
-  tar -xf luarocks-${LUAROCKS_VERSION}.tar.gz
-  cd luarocks-${LUAROCKS_VERSION}
-  ./configure --prefix=${APP_PREFIX} --lua-suffix=jit --with-lua=${APP_PREFIX}/luajit --with-lua-include=${APP_PREFIX}/luajit/include/luajit-2.1
-  make build
-  make install
-  cd ..
-
-  topic "Caching build"
-  mkdir -p $PREFIX_CACHE_DIR
-  cp -Rf $APP_PREFIX/* $PREFIX_CACHE_DIR/
-
-else
-  error "Error detecting cached build: diff exited ${DIFF_STATUS}"
-fi
-
-
-topic "Building Kong from ${KONG_GIT_URL}#${KONG_GIT_COMMITISH}"
-# Move the unfortunately named `.luarocks` spec file so that it doesn't
-# interfere during CI. We're migrating Kong apps to use `Rockfile` instead.
-if [ -f "$BUILD_DIR/.luarocks" ]; then
-  mv "$BUILD_DIR/.luarocks" "$BUILD_DIR/Rockfile"
-  echo "Move $BUILD_DIR/.luarocks to $BUILD_DIR/Rockfile" | indent
-fi
-# Ensure we don't have Kong from a previous build
-luarocks remove kong || true
-echo "luaroks removes KONG" | indent
-
-if [ -d "$KONG_SOURCE_DIR" ]
-then
-  echo "Fetch kong  $KONG_GIT_COMMITISH into $KONG_SOURCE_DIR" | indent
-  cd $KONG_SOURCE_DIR
-  git fetch
-  git fetch --tags
-  git reset --hard $(git rev-list -n 1 $KONG_GIT_COMMITISH)
-else
-  echo "Clone $KONG_GIT_URL and checkout $KONG_GIT_COMMITISH into $KONG_SOURCE_DIR" | indent
-  git clone $KONG_GIT_URL $KONG_SOURCE_DIR
-  cd $KONG_SOURCE_DIR
-  git checkout $KONG_GIT_COMMITISH
-fi
-export OPENSSL_DIR=${APP_PREFIX}
-# Install Kong itself from the cloned git repo
-luarocks make ./kong-*.rockspec
-# Install Kong's dependencies via LuaRocks
-# (`--local` is required for this to do anything)
-luarocks install --local ./kong-*.rockspec
-mkdir -p ${APP_PREFIX}/bin
-mv bin/* ${APP_PREFIX}/bin/
-
-RESTY_KONG_TLS_VERSION=0.0.6
-RESTY_KONG_TLS_GITHUB_URI=https://raw.githubusercontent.com/Kong/lua-kong-nginx-module
-RESTY_KONG_TLS_FILE_URI=$RESTY_KONG_TLS_GITHUB_URI/$RESTY_KONG_TLS_VERSION/lualib/resty/kong/tls.lua
-LUAROCKS_SHARE=/app/kong-runtime/share/lua/5.1
-mkdir -p $LUAROCKS_SHARE/resty/kong
-curl -sSL $RESTY_KONG_TLS_FILE_URI -o $LUAROCKS_SHARE/resty/kong/tls.lua
-
-topic "Downloading and installing golang"
-##download and install golang
-GO_URL=https://dl.google.com/go/go${GOLANG_VERSION}.linux-amd64.tar.gz
-curl $GO_URL -o go${GOLANG_VERSION}.linux-amd64.tar.gz
-tar -xz -f go${GOLANG_VERSION}.linux-amd64.tar.gz -C $APP_PREFIX
-go get github.com/Kong/go-pluginserver
-mkdir ${APP_PREFIX}/go-plugins
-
-
-topic "Installing Lua rocks specified in Rockfile"
-cd ${BUILD_DIR}
-${BP_DIR}/bin/install-luarocks
 
 topic "Enabling runtime configuration & processes"
 cd ${BP_DIR}
@@ -280,16 +90,6 @@ cp $BP_DIR/bin/app/heroku-* $BUILD_DIR/bin/
 echo "Runtime available in $BP_DIR" | indent
 ls -R ${BP_DIR}
 
-topic "Applying buildpack v6.0.0 backward-compatibility patch"
-if [ ! -d ".heroku" ]
-then
-  echo "Linking '/app/.heroku' to '/app/$KONG_RUNTIME'" | indent
-  ln -s "$KONG_RUNTIME/" .heroku
-else
-  echo "'/app/.heroku' exists. Linking skipped." | indent
-  echo "Ensure the app's 'config/kong.conf.etlua' sets the prefix to '/app/$KONG_RUNTIME'" | indent
-fi
-
 # Avoid moving build for CI, because build is in the right place already.
 if [ ! "$BUILD_DIR" = "/app" ]; then
   topic "Making build artifacts available to app"
@@ -297,11 +97,4 @@ if [ ! "$BUILD_DIR" = "/app" ]; then
   cp -r $APP_PREFIX $BUILD_DIR/$KONG_RUNTIME
 fi
 
-# run kong post-build if available
-if [[ -f $BUILD_DIR/bin/kong-post-build ]]; then
-    echo "Running bin/kong-post-build hook" | indent
-    chmod a+x $BUILD_DIR/bin/kong-post-build
-    $BUILD_DIR/bin/kong-post-build $BUILD_DIR
-fi
-
-echo "Buildpack compile success"
+echo "Build completed"
