@@ -2,9 +2,6 @@
 
 set -e
 
-# script fails if executed from bin
-cd ..
-
 SCRIPT_PATH=
 PREFIX=
 DOWNLOAD_CACHE=work
@@ -297,9 +294,6 @@ main() {
           if [[ ! -d "openresty-patches" ]]; then
             warn "Kong OpenResty patches not found, cloning..."
             git clone https://github.com/Kong/openresty-patches
-
-            warn "Copy missing 19.9.1.1"
-            
           fi
 
           pushd openresty-patches
