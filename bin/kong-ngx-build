@@ -2,6 +2,9 @@
 
 set -e
 
+# script fails if executed from bin
+cd ..
+
 SCRIPT_PATH=
 PREFIX=
 DOWNLOAD_CACHE=work
@@ -21,6 +24,8 @@ DIST_VER=
 NGINX_EXTRA_MODULES=()
 
 PARAMS=""
+
+OPENRESTY_VENDORS_PATCH=vendor/openresty_patches/1.19.9.1
 
 main() {
   OS=$(uname -s)
@@ -186,8 +191,9 @@ main() {
   OPENRESTY_PREFIX=${OPENRESTY_PREFIX:-$PREFIX/openresty}
 
   OPENSSL_INSTALL=$(canon_path $OPENSSL_DESTDIR/$OPENSSL_PREFIX)
+  echo "OPENSSL_INSTALL=$OPENSSL_INSTALL"
   OPENRESTY_INSTALL=$(canon_path $OPENRESTY_DESTDIR/$OPENRESTY_PREFIX)
-
+  echo "OPENRESTY_INSTALL=$OPENRESTY_INSTALL"
   if version_lt $NGINX_CORE_VER 1.13.6 || version_lt $OPENSSL_VER 1.1; then
     # unconditionally disable module in older core since they are never tested
     KONG_NGINX_MODULE=0
@@ -252,12 +258,11 @@ main() {
       if [ ! -f $LUAROCKS_INSTALL/bin/luarocks ]; then
         LUAROCKS_DOWNLOAD=$DOWNLOAD_CACHE/luarocks-$LUAROCKS_VER
         if [ ! -d $LUAROCKS_DOWNLOAD ]; then
-          warn "LuaRocks source not found, downloading $LUAROCKS_VER to $LUAROCKS_DOWNLOAD"
+          warn "LuaRocks source not found, downloading..."
           curl -sSLO https://luarocks.org/releases/luarocks-$LUAROCKS_VER.tar.gz
           if [ ! -z ${LUAROCKS_SHA+x} ]; then
             echo "$LUAROCKS_SHA luarocks-$LUAROCKS_VER.tar.gz" | sha256sum -c -
           fi
-          file luarocks-$LUAROCKS_VER.tar.gz
           tar -xzvf luarocks-$LUAROCKS_VER.tar.gz
         fi
       fi
@@ -271,10 +276,12 @@ main() {
           git clone https://github.com/Kong/lua-kong-nginx-module
         fi
 
-        pushd lua-kong-nginx-module
-          git fetch
-          git reset --hard origin/$KONG_NGINX_MODULE
-        popd
+         # [ibu] unnecessary step if running this script with --force
+        # pushd lua-kong-nginx-module
+        #   warn "lua-kong-nginx-module hard reset..."
+        #   git fetch
+        #   git reset --hard origin/$KONG_NGINX_MODULE
+        # popd
       popd
     fi
   popd
@@ -290,12 +297,20 @@ main() {
           if [[ ! -d "openresty-patches" ]]; then
             warn "Kong OpenResty patches not found, cloning..."
             git clone https://github.com/Kong/openresty-patches
+
+            warn "Copy missing 19.9.1.1"
+            
           fi
 
           pushd openresty-patches
-            notice "Checking out branch '$OPENRESTY_PATCHES' of Kong's OpenResty patches..."
-            git fetch
-            git reset --hard origin/$OPENRESTY_PATCHES
+           if [[ ! -d "19.9.1.1" ]]; then
+              warn "Copy missing 19.9.1.1 from vendors"
+              cp -r "../../$OPENRESTY_VENDORS_PATCH" patches/1.19.9.1
+           fi
+            # read-only repo 
+            # notice "Checking out branch '$OPENRESTY_PATCHES' of Kong's OpenResty patches..."
+            # git fetch
+            # git reset --hard origin/$OPENRESTY_PATCHES
           popd
         popd
         OPENRESTY_PATCHES_DIR=$DOWNLOAD_CACHE/openresty-patches

@@ -75,7 +75,7 @@ export | grep -E -e ' (PATH|LD_LIBRARY_PATH|LIBRARY_PATH|INCLUDE_PATH|CPATH|CPPP
 topic "Building with open-resty"
 ls -R
 
-./bin/kong-ngx-build -p BUILD_DIR --openresty 1.19.9.1 --openssl 1.1.1m --luarocks 3.8.0 --debug
+./bin/kong-ngx-build -p buildroot --openresty 1.19.9.1 --openssl 1.1.1m --luarocks 3.8.0 -f --debug
 
 
 topic "Enabling runtime configuration & processes"
