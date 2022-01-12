@@ -2,3 +2,6 @@ config/kong.yml
 config/cassandra.cert
 
 config/kong.conf.etlua
+work
+.profile.d
+buildroot

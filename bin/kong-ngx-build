@@ -2,6 +2,9 @@
 
 set -e
 
+KONG_RUNTIME=kong-runtime
+APP_PREFIX=/app/$KONG_RUNTIME
+
 SCRIPT_PATH=
 PREFIX=
 DOWNLOAD_CACHE=work
@@ -186,8 +189,9 @@ main() {
   OPENRESTY_PREFIX=${OPENRESTY_PREFIX:-$PREFIX/openresty}
 
   OPENSSL_INSTALL=$(canon_path $OPENSSL_DESTDIR/$OPENSSL_PREFIX)
+  echo "OPENSSL_INSTALL=$OPENSSL_INSTALL"
   OPENRESTY_INSTALL=$(canon_path $OPENRESTY_DESTDIR/$OPENRESTY_PREFIX)
-
+  echo "OPENRESTY_INSTALL=$OPENRESTY_INSTALL"
   if version_lt $NGINX_CORE_VER 1.13.6 || version_lt $OPENSSL_VER 1.1; then
     # unconditionally disable module in older core since they are never tested
     KONG_NGINX_MODULE=0
@@ -199,12 +203,13 @@ main() {
     # OpenSSL
 
     if [[ ! -f $OPENSSL_INSTALL/bin/openssl && ! -d $OPENSSL_DOWNLOAD ]]; then
-      warn "OpenSSL source not found, downloading..."
+      warn "OpenSSL $OPENSSL_VER source not found, downloading..."
+      pwd
       curl -sSLO https://www.openssl.org/source/openssl-$OPENSSL_VER.tar.gz
       if [ ! -z ${OPENSSL_SHA+x} ]; then
         echo "$OPENSSL_SHA openssl-$OPENSSL_VER.tar.gz" | sha256sum -c -
       fi
-      tar -xzvf openssl-$OPENSSL_VER.tar.gz
+      tar -xzf openssl-$OPENSSL_VER.tar.gz
     fi
 
     # OpenResty
@@ -225,7 +230,7 @@ main() {
         if [ ! -z ${OPENRESTY_SHA+x} ]; then
           echo "$OPENRESTY_SHA openresty-$OPENRESTY_VER.tar.gz" | sha256sum -c -
         fi
-        tar -xzvf openresty-$OPENRESTY_VER.tar.gz
+        tar -xzf openresty-$OPENRESTY_VER.tar.gz
       fi
     fi
 
@@ -239,7 +244,7 @@ main() {
         if [ ! -z ${PCRE_SHA+x} ]; then
           echo "$PCRE_SHA pcre-${PCRE_VER}.tar.gz" | sha256sum -c -
         fi
-        tar -xzvf pcre-${PCRE_VER}.tar.gz
+        tar -xzf pcre-${PCRE_VER}.tar.gz
       fi
     fi
 
@@ -252,13 +257,12 @@ main() {
       if [ ! -f $LUAROCKS_INSTALL/bin/luarocks ]; then
         LUAROCKS_DOWNLOAD=$DOWNLOAD_CACHE/luarocks-$LUAROCKS_VER
         if [ ! -d $LUAROCKS_DOWNLOAD ]; then
-          warn "LuaRocks source not found, downloading $LUAROCKS_VER to $LUAROCKS_DOWNLOAD"
+          warn "LuaRocks source not found, downloading..."
           curl -sSLO https://luarocks.org/releases/luarocks-$LUAROCKS_VER.tar.gz
           if [ ! -z ${LUAROCKS_SHA+x} ]; then
             echo "$LUAROCKS_SHA luarocks-$LUAROCKS_VER.tar.gz" | sha256sum -c -
           fi
-          file luarocks-$LUAROCKS_VER.tar.gz
-          tar -xzvf luarocks-$LUAROCKS_VER.tar.gz
+          tar -xzf luarocks-$LUAROCKS_VER.tar.gz
         fi
       fi
     fi
@@ -271,10 +275,12 @@ main() {
           git clone https://github.com/Kong/lua-kong-nginx-module
         fi
 
-        pushd lua-kong-nginx-module
-          git fetch
-          git reset --hard origin/$KONG_NGINX_MODULE
-        popd
+         # [ibu] unnecessary step if running this script with --force
+        # pushd lua-kong-nginx-module
+        #   warn "lua-kong-nginx-module hard reset..."
+        #   git fetch
+        #   git reset --hard origin/$KONG_NGINX_MODULE
+        # popd
       popd
     fi
   popd
@@ -293,9 +299,15 @@ main() {
           fi
 
           pushd openresty-patches
-            notice "Checking out branch '$OPENRESTY_PATCHES' of Kong's OpenResty patches..."
-            git fetch
-            git reset --hard origin/$OPENRESTY_PATCHES
+           if [[ ! -d "19.9.1.1" ]]; then
+              warn "Copy missing 19.9.1.1 from vendors"
+              pwd
+              cp -r "../openresty_patches/1.19.9.1" patches/1.19.9.1
+           fi
+            # read-only repo 
+            # notice "Checking out branch '$OPENRESTY_PATCHES' of Kong's OpenResty patches..."
+            # git fetch
+            # git reset --hard origin/$OPENRESTY_PATCHES
           popd
         popd
         OPENRESTY_PATCHES_DIR=$DOWNLOAD_CACHE/openresty-patches
@@ -381,22 +393,25 @@ main() {
     fi
   fi
 
-  notice "Building the components now..."
 
+  notice "Building the components now..."
+  pwd
   # Building OpenSSL
 
   if [ ! -f $OPENSSL_INSTALL/bin/openssl ]; then
     notice "Building OpenSSL..."
 
     pushd $OPENSSL_DOWNLOAD
+      echo "Building OpenSSL at $(pwd) with --prefix:$APP_PREFIX"
+
       if (version_lte $OPENSSL_VER 1.0 && [[ ! -d include/openssl ]]) || [[ ! -f Makefile ]]; then
           OPENSSL_OPTS=(
             "-g"
             "shared"
             "-DPURIFY"
             "no-threads"
-            "--prefix=$OPENSSL_PREFIX"
-            "--openssldir=$OPENSSL_PREFIX"
+            "--prefix=$APP_PREFIX"
+            "--openssldir=$APP_PREFIX"
           )
 
           if version_gte $OPENSSL_VER 1.1.0; then
@@ -427,12 +442,10 @@ main() {
       else
         make
       fi
-
-      make install_sw DESTDIR=${OPENSSL_DESTDIR}
+      make install_sw
     popd
 
     succ "OpenSSL $OPENSSL_VER has been built successfully!"
-
   else
     succ "OpenSSL $OPENSSL_VER has been built successfully (cached)!"
   fi
@@ -446,7 +459,7 @@ main() {
       if [ ! -f Makefile ]; then
         OPENRESTY_RPATH=${OPENRESTY_RPATH:-$OPENSSL_INSTALL/lib}
         OPENRESTY_OPTS=(
-          "--prefix=$OPENRESTY_PREFIX"
+          "--prefix=$APP_PREFIX"
           "--with-cc-opt='-I$OPENSSL_INSTALL/include'"
           "--with-ld-opt='-L$OPENSSL_INSTALL/lib -Wl,-rpath,$OPENRESTY_RPATH'"
           "--with-pcre-jit"
@@ -467,6 +480,7 @@ main() {
 
         if [ $KONG_NGINX_MODULE != 0 ]; then
           OPENRESTY_OPTS+=('--add-module=$DOWNLOAD_CACHE/lua-kong-nginx-module')
+          OPENRESTY_OPTS+=('--add-module=$DOWNLOAD_CACHE/lua-kong-nginx-module/stream')
         fi
 
         if [ ! -z "$PCRE_VER" ]; then
@@ -483,6 +497,7 @@ main() {
           OPENRESTY_OPTS+=('--with-luajit-xcflags="-DLUAJIT_USE_VALGRIND -DLUA_USE_ASSERT -DLUA_USE_APICHECK -DLUAJIT_USE_SYSMALLOC"')
         fi
 
+        echo "Openresty ./configure ${OPENRESTY_OPTS[*]}"
         eval ./configure ${OPENRESTY_OPTS[*]}
       fi
 
@@ -492,7 +507,7 @@ main() {
       if [ $KONG_NGINX_MODULE != 0 ]; then
         pushd $DOWNLOAD_CACHE/lua-kong-nginx-module
           warn "installing library files for lua-kong-nginx-module..."
-          make install LUA_LIB_DIR=$OPENRESTY_INSTALL/lualib
+          make install LUA_LIB_DIR=$APP_PREFIX/lualib
         popd
       fi
     popd
@@ -512,10 +527,10 @@ main() {
       pushd $LUAROCKS_DOWNLOAD
         if [ ! -f config.unix ]; then
           ./configure \
-            --prefix=$LUAROCKS_PREFIX \
+            --prefix=$APP_PREFIX \
             --lua-suffix=jit \
-            --with-lua=$OPENRESTY_INSTALL/luajit \
-            --with-lua-include=$OPENRESTY_INSTALL/luajit/include/luajit-2.1
+            --with-lua=$APP_PREFIX/luajit \
+            --with-lua-include=$APP_PREFIX/luajit/include/luajit-2.1
         fi
 
         make build -j$NPROC

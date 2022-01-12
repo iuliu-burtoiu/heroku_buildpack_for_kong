@@ -12,15 +12,63 @@ set -u
 
 # parse and derive params
 BUILD_DIR=$1
+echo "BUILD_DIR=$BUILD_DIR"
+
 CACHE_DIR=$2
+echo "CACHE_DIR=$CACHE_DIR"
+
 ENV_DIR=$3
+echo "ENV_DIR=$ENV_DIR"
+
 BP_DIR=`cd $(dirname $0); cd ..; pwd`
+echo "BP_DIR=$BP_DIR"
+
 VENDOR_DIR=${BP_DIR}/vendor
+echo "VENDOR_DIR=$VENDOR_DIR"
+
+START_DIR=`pwd`
+echo "START_DIR=$START_DIR"
 
 # Make dyno runtime-compatible prefix for compiled artifacts
 KONG_RUNTIME=kong-runtime
 APP_PREFIX=/app/$KONG_RUNTIME
 mkdir -p $APP_PREFIX
+echo "Make dyno runtime-compatible prefix for compiled artifacts: $APP_PREFIX"
+pwd
+
+# Cache compilation artifacts between builds
+BP_CACHE_DIR="$CACHE_DIR/heroku-kong-buildpack"
+mkdir -p $BP_CACHE_DIR
+PREFIX_CACHE_DIR=$BP_CACHE_DIR/app_prefix
+echo "Make cache dir at: BP_CACHE_DIR=$BP_CACHE_DIR for compilation artifacts between build"
+echo "PREFIX_CACHE_DIR=$PREFIX_CACHE_DIR"
+pwd
+
+# Source for Kong
+if [ -f "${ENV_DIR}/KONG_GIT_URL" ]
+then
+  KONG_GIT_URL=`cat ${ENV_DIR}/KONG_GIT_URL`
+else
+  KONG_GIT_URL="https://github.com/kong/kong.git"
+fi
+# commit or tag to checkout
+if [ -f "${ENV_DIR}/KONG_GIT_COMMITISH" ]
+then
+  KONG_GIT_COMMITISH=`cat ${ENV_DIR}/KONG_GIT_COMMITISH`
+else
+  KONG_GIT_COMMITISH="2.7.0"
+fi
+
+KONG_SOURCE_DIR="${BP_CACHE_DIR}/kong-source"
+
+
+# Set dependency versions.
+# These correspond to the archives in `vendor/`.
+# If upgrading any those archives, then update the corresponding version here.
+LUAROCKS_VERSION=3.8.0
+OPENSSL_VERSION=1.1.1m
+OPENRESTY_VERSION=1.19.9.1
+GOLANG_VERSION=1.17.5
 
 function error() {
   echo " !     $*" >&2
@@ -38,6 +86,39 @@ function indent() {
     *)      sed -u "$c";;
   esac
 }
+
+APT_CACHE_DIR="$CACHE_DIR/apt/cache"
+APT_STATE_DIR="$CACHE_DIR/apt/state"
+
+mkdir -p "$APT_CACHE_DIR/archives/partial"
+mkdir -p "$APT_STATE_DIR/lists/partial"
+
+APT_OPTIONS="-o debug::nolocking=true -o dir::cache=$APT_CACHE_DIR -o dir::state=$APT_STATE_DIR"
+
+topic "Updating apt caches"
+pwd
+apt-get $APT_OPTIONS update | indent
+
+for PACKAGE in $(cat $BP_DIR/Aptfile $BUILD_DIR/Aptfile); do
+  if [[ $PACKAGE == *deb ]]; then
+    PACKAGE_NAME=$(basename $PACKAGE .deb)
+    PACKAGE_FILE=$APT_CACHE_DIR/archives/$PACKAGE_NAME.deb
+
+    topic "Fetching $PACKAGE"
+    curl -s -L -z $PACKAGE_FILE -o $PACKAGE_FILE $PACKAGE 2>&1 | indent
+  else
+    topic "Fetching .debs for $PACKAGE"
+    apt-get $APT_OPTIONS -y --allow-downgrades --allow-remove-essential --allow-change-held-packages -d install --reinstall $PACKAGE | indent
+  fi
+done
+
+mkdir -p $BUILD_DIR/.apt
+
+for DEB in $(ls -1 $APT_CACHE_DIR/archives/*.deb); do
+  topic "Installing $(basename $DEB) into build_dir/.apt: $BUILD_DIR/.apt/"
+  pwd
+  dpkg -x $DEB $BUILD_DIR/.apt/
+done
 
 topic "Writing profile script"
 mkdir -p $BUILD_DIR/.profile.d
@@ -71,15 +152,90 @@ export LUA_CPATH="$BUILD_DIR/lib/?.so;$BUILD_DIR/.luarocks/lib/lua/5.1/?.so;$APP
 #give environment to later buildpacks
 export | grep -E -e ' (PATH|LD_LIBRARY_PATH|LIBRARY_PATH|INCLUDE_PATH|CPATH|CPPPATH|PKG_CONFIG_PATH)='  > "$BP_DIR/export"
 
+# Proceed with build from source
+# Build from source to have dyno-compatible path prefix
+
+# Cache the build
+VENDOR_CACHE_DIR=${BP_CACHE_DIR}/vendor
+mkdir -p ${VENDOR_CACHE_DIR}
+echo "Make vendor cache build to cache the build at: VENDOR_CACHE_DIR=$VENDOR_CACHE_DIR" | indent
+pwd
+
+# Clean-up previous cache
+rm -rf ${VENDOR_CACHE_DIR}
+echo "Remove VENDOR_CACHE_DIR=$VENDOR_CACHE_DIR" | indent
+pwd
+
+# and cache the new source code
+mv ${VENDOR_DIR} ${VENDOR_CACHE_DIR}
+echo "Move VENDOR_DIR=$VENDOR_DIR into VENDOR_CACHE_DIR=$VENDOR_CACHE_DIR" | indent
+pwd
 
 topic "Building with open-resty"
-ls -R
+./bin/kong-ngx-build -p $VENDOR_CACHE_DIR --work $VENDOR_CACHE_DIR  --openresty $OPENRESTY_VERSION --openssl $OPENSSL_VERSION --luarocks $LUAROCKS_VERSION
 
-./bin/kong-ngx-build -p BUILD_DIR --openresty 1.19.9.1 --openssl 1.1.1m --luarocks 3.8.0 --debug
+cd ${VENDOR_CACHE_DIR}
+topic "Building Kong from ${KONG_GIT_URL}#${KONG_GIT_COMMITISH}"
+pwd
+# Move the unfortunately named `.luarocks` spec file so that it doesn't
+# interfere during CI. We're migrating Kong apps to use `Rockfile` instead.
+if [ -f "$BUILD_DIR/.luarocks" ]; then
+  mv "$BUILD_DIR/.luarocks" "$BUILD_DIR/Rockfile"
+fi
+echo "Luarocks version: $(luarocks --version)" | indent
+# Ensure we don't have Kong from a previous build
+luarocks remove kong || true
+if [ -d "$KONG_SOURCE_DIR" ]
+then
+  cd $KONG_SOURCE_DIR
+  echo "fetch kong into $KONG_SOURCE_DIR" | indent
+  pwd
+  git fetch
+  git fetch --tags
+  git reset --hard $(git rev-list -n 1 $KONG_GIT_COMMITISH)
+else
+  echo "clone kong into $KONG_SOURCE_DIR" | indent
+  pwd
+  git clone $KONG_GIT_URL $KONG_SOURCE_DIR
+  cd $KONG_SOURCE_DIR
+  git checkout $KONG_GIT_COMMITISH
+fi
+export OPENSSL_DIR=${APP_PREFIX}
+# Install Kong itself from the cloned git repo
+luarocks make ./kong-*.rockspec
+# Install Kong's dependencies via LuaRocks
+# (`--local` is required for this to do anything)
+echo "Install Kong's dependencies via LuaRocks" | indent
+pwd
+luarocks install --local ./kong-*.rockspec
+mkdir -p ${APP_PREFIX}/bin
+mv bin/* ${APP_PREFIX}/bin/
+
+# RESTY_KONG_TLS_VERSION=0.0.6
+# RESTY_KONG_TLS_GITHUB_URI=https://raw.githubusercontent.com/Kong/lua-kong-nginx-module
+# RESTY_KONG_TLS_FILE_URI=$RESTY_KONG_TLS_GITHUB_URI/$RESTY_KONG_TLS_VERSION/lualib/resty/kong/tls.lua
+# LUAROCKS_SHARE=/app/kong-runtime/share/lua/5.1
+# mkdir -p $LUAROCKS_SHARE/resty/kong
+# curl -sSL $RESTY_KONG_TLS_FILE_URI -o $LUAROCKS_SHARE/resty/kong/tls.lua
+
+# topic "Downloading and installing golang"
+# ##download and install golang
+# GO_URL=https://dl.google.com/go/go${GOLANG_VERSION}.linux-amd64.tar.gz
+# curl $GO_URL -o go${GOLANG_VERSION}.linux-amd64.tar.gz
+# tar -xz -f go${GOLANG_VERSION}.linux-amd64.tar.gz -C $APP_PREFIX
+# go get github.com/Kong/go-pluginserver
+# mkdir ${APP_PREFIX}/go-plugins
+
+
+topic "Installing Lua rocks specified in Rockfile"
+cd ${BUILD_DIR}
+pwd
+${BP_DIR}/bin/install-luarocks
 
 
 topic "Enabling runtime configuration & processes"
 cd ${BP_DIR}
+pwd
 mkdir -p $BUILD_DIR/.profile.d
 mv .profile.d/* $BUILD_DIR/.profile.d
 mkdir -p $BUILD_DIR/config
@@ -88,13 +244,16 @@ mv config/* $BUILD_DIR/config
 mkdir -p $BUILD_DIR/bin
 cp $BP_DIR/bin/app/heroku-* $BUILD_DIR/bin/
 echo "Runtime available in $BP_DIR" | indent
-ls -R ${BP_DIR}
+pwd
+ls $BP_DIR
 
 # Avoid moving build for CI, because build is in the right place already.
 if [ ! "$BUILD_DIR" = "/app" ]; then
   topic "Making build artifacts available to app"
-  echo "copy files from $APP_PREFIX to $BUILD_DIR/$KONG_RUNTIME" | indent
   cp -r $APP_PREFIX $BUILD_DIR/$KONG_RUNTIME
+  echo "...copy $APP_PREFIX to $BUILD_DIR/$KONG_RUNTIME" | indent
+  pwd
+  ls $APP_PREFIX
 fi
 
-echo "Build completed"
+echo "Kong build completed"
