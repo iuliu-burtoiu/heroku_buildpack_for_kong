@@ -1,0 +1,22 @@
+{
+  "workbench.colorCustomizations": {
+    // Totally Transparent
+    // "editor.selectionHighlightBackground": "#ffffff00",
+    "editor.findMatchHighlightBackground": "#ffff004D",
+    // Borders
+    // "editor.findMatchBorder": "#ffff00",
+    // "editor.findMatchHighlightBorder": "#ffff00",
+    // "editor.selectionHighlightBorder": "#ffffff",
+    // "editor.lineHighlightBorder": "#272727",
+    // Selection
+    // "editor.selectionBackground": "#771835",
+    // "editor.wordHighlightBackground": "#771835",
+    // Misc
+    // "editorCursor.foreground": "#00ff00",
+    // "editor.lineHighlightBackground": "#181818",
+    "editor.findMatchBackground": "#ffff009C",
+    // Debugger
+    // "statusBar.debuggingBackground": "#410d18",
+    // "statusBar.debuggingForeground": "#dddddd"
+  }
+}
