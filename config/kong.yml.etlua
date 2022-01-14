@@ -1,9 +1,56 @@
 _format_version: "1.1"
 
 services:
-- name: my-service
-  url: https://httpbin.org/get
+
+- name: httpbin-default
+  url: https://httpbin.org
   routes:
-  - name: my-httpbin
+  - name: root
     paths:
     - /
+
+- name: httpbin-get
+  url: https://httpbin.org/get
+  routes:
+  - name: the-GET
+    methods:
+    - GET
+    paths:
+    - /get
+
+- name: httpbin-post
+  url: https://httpbin.org/post
+  routes:
+  - name: the-POST
+    methods:
+    - POST
+    paths:
+    - /post
+
+- name: httpbin-patch
+  url: https://httpbin.org/patch
+  routes:
+  - name: the-PATCH
+    methods:
+    - PATCH
+    paths:
+    - /patch
+
+- name: httpbin-put
+  url: https://httpbin.org/put
+  routes:
+  - name: the-PUT
+    methods:
+    - PUT
+    paths:
+    - /put
+
+- name: httpbin-delete
+  url: https://httpbin.org/delete
+  routes:
+  - name: the-DELETE
+    methods:
+    - DELETE
+    paths:
+    - /delete
+
