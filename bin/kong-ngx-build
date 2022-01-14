@@ -507,7 +507,7 @@ main() {
       if [ $KONG_NGINX_MODULE != 0 ]; then
         pushd $DOWNLOAD_CACHE/lua-kong-nginx-module
           warn "installing library files for lua-kong-nginx-module..."
-          make install LUA_LIB_DIR=$OPENRESTY_INSTALL/lualib
+          make install LUA_LIB_DIR=$APP_PREFIX/lualib
         popd
       fi
     popd
