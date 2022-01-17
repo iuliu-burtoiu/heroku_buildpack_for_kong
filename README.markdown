@@ -1,12 +1,13 @@
 ## NOTE
-This is a fork of the original [`heroku-buildpack-kong`](https://github.com/heroku/heroku-buildpack-kong)
+This is based on original work by ['riskmethod'] (https://github.com/riskmethods/heroku-buildpack-kong) 
+combined with ['openresty-build-tools'] (https://github.com/Kong/kong-build-tools/tree/master/openresty-build-tools)
 
-[Heroku Buildpack](https://devcenter.heroku.com/articles/buildpacks) for [Kong](https://getkong.org/about/)
+[Heroku Buildpack](https://devcenter.heroku.com/articles/buildpacks) for [Kong 2.7.0](https://getkong.org/about/)
 =========================
 
-Deploy [Kong 2.0.3](https://konghq.com) as a Heroku app.
+Deploy [Kong 2.7.0](https://konghq.com) as a Heroku app.
 
-🔬👩‍💻 This software is a community proof-of-concept: [MIT license](LICENSE)
+This software is a community proof-of-concept: [MIT license](LICENSE)
 
 Usage
 -----
@@ -102,8 +103,6 @@ Kong is an Nginx-based application. To customize the underlying Nginx configurat
 This buildpack installs a [release phase](https://devcenter.heroku.com/articles/release-phase) script to automatically run Kong's database migrations for each deployment.
 
 Apps can define a custom pre-release script which will be automatically invoked before the built-in release phase script.
-
-Simply commit your executable script to the app's repo as `bin/prerelease`, and then that script will be run for every release. The release will fail if the script exits with non-zero status.
 
 #### Testing
 

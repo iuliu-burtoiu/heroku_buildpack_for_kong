@@ -1,7 +1,0 @@
-declare -x CPATH="/app/kong-runtime/include:/kong_bp_dir/.apt/usr/local/include:/kong_bp_dir/.apt/usr/include:/usr/include/x86_64-linux-gnu:/usr/include"
-declare -x CPPPATH="/app/kong-runtime/include:/kong_bp_dir/.apt/usr/local/include:/kong_bp_dir/.apt/usr/include:/usr/include/x86_64-linux-gnu:/usr/include"
-declare -x INCLUDE_PATH="/app/kong-runtime/include:/kong_bp_dir/.apt/usr/local/include:/kong_bp_dir/.apt/usr/include:/usr/include/x86_64-linux-gnu:/usr/include"
-declare -x LD_LIBRARY_PATH="/app/kong-runtime/lib:/kong_bp_dir/.apt/usr/lib/x86_64-linux-gnu:/kong_bp_dir/.apt/usr/local/lib:/kong_bp_dir/.apt/usr/lib:/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/usr/lib"
-declare -x LIBRARY_PATH="/app/kong-runtime/lib:/kong_bp_dir/.apt/usr/lib/x86_64-linux-gnu:/kong_bp_dir/.apt/usr/local/lib:/kong_bp_dir/.apt/usr/lib:/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/usr/lib"
-declare -x PATH="/app/kong-runtime/nginx/sbin:/app/kong-runtime/luajit/bin:/app/kong-runtime/bin:/app/kong-runtime/go/bin:/kong_bp_dir/.apt/usr/local/bin:/kong_bp_dir/.apt/usr/bin:/kong_bp_dir/.apt/usr/sbin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-declare -x PKG_CONFIG_PATH="/kong_bp_dir/.apt/usr/local/lib/pkgconfig:/kong_bp_dir/.apt/usr/lib/x86_64-linux-gnu/pkgconfig:/kong_bp_dir/.apt/usr/lib/pkgconfig"

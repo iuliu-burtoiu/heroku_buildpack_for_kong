@@ -28,8 +28,7 @@ RUN mkdir -p ${BP_DIR} ${BUILD_DIR} ${CACHE_DIR} ${ENV_DIR}
 
 COPY . /app
 
-# ./bin/compile1 kong_bp work kong_cache kong_env
-RUN ./bin/compile1 /${BP_DIR} /${BUILD_DIR} /$CACHE_DIR /${ENV_DIR}
+RUN ./bin/compile /${BP_DIR} /${BUILD_DIR} /$CACHE_DIR /${ENV_DIR}
 
-CMD ./bin/compile2 /${BP_DIR} /${BUILD_DIR} /$CACHE_DIR /${ENV_DIR}
+CMD [kong start -c ./config/kong.conf]
 
