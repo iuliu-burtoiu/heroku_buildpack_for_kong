@@ -10,6 +10,14 @@ set -u
 # Debug, echo every command
 #set -x
 
+# Set dependency versions.
+# These correspond to the archives in `vendor/`.
+# If upgrading any those archives, then update the corresponding version here.
+LUAROCKS_VERSION=3.8.0
+OPENSSL_VERSION=1.1.1m
+OPENRESTY_VERSION=1.19.9.1
+# GOLANG_VERSION=1.17.5
+
 # parse and derive params
 BUILD_DIR=$1
 CACHE_DIR=$2
@@ -22,15 +30,12 @@ KONG_RUNTIME=kong-runtime
 APP_PREFIX=/app/$KONG_RUNTIME
 mkdir -p $APP_PREFIX
 echo "Make dyno runtime-compatible prefix for compiled artifacts: $APP_PREFIX"
-pwd
 
 # Cache compilation artifacts between builds
 BP_CACHE_DIR="$CACHE_DIR/heroku-kong-buildpack"
 mkdir -p $BP_CACHE_DIR
 PREFIX_CACHE_DIR=$BP_CACHE_DIR/app_prefix
 echo "Make cache dir at: BP_CACHE_DIR=$BP_CACHE_DIR for compilation artifacts between build"
-echo "PREFIX_CACHE_DIR=$PREFIX_CACHE_DIR"
-pwd
 
 # Source for Kong
 if [ -f "${ENV_DIR}/KONG_GIT_URL" ]
@@ -48,15 +53,6 @@ else
 fi
 
 KONG_SOURCE_DIR="${BP_CACHE_DIR}/kong-source"
-
-
-# Set dependency versions.
-# These correspond to the archives in `vendor/`.
-# If upgrading any those archives, then update the corresponding version here.
-LUAROCKS_VERSION=3.8.0
-OPENSSL_VERSION=1.1.1m
-OPENRESTY_VERSION=1.19.9.1
-GOLANG_VERSION=1.17.5
 
 function error() {
   echo " !     $*" >&2
@@ -144,7 +140,6 @@ export | grep -E -e ' (PATH|LD_LIBRARY_PATH|LIBRARY_PATH|INCLUDE_PATH|CPATH|CPPP
 # Cache the build
 VENDOR_CACHE_DIR=${BP_CACHE_DIR}/vendor
 mkdir -p ${VENDOR_CACHE_DIR}
-echo "Make vendor cache build to cache the build at: VENDOR_CACHE_DIR=$VENDOR_CACHE_DIR" | indent
 
 # Detect changes in the vendor/ sources
 topic "Detecting changes in vendor/"
@@ -264,9 +259,8 @@ then
   topic "Caching build"
   mkdir -p $PREFIX_CACHE_DIR
   cp -Rf $APP_PREFIX/* $PREFIX_CACHE_DIR/
-  echo "...build cached at$ (pwd)" | indent
-  echo "...copy from APP_PREFIX=$APP_PREFIX into PREFIX_CACHE_DIR=$PREFIX_CACHE_DIR" | indent
-  ls $APP_PREFIX
+  echo "...caching build into PREFIX_CACHE_DIR=$PREFIX_CACHE_DIR" | indent
+  ls $PREFIX_CACHE_DIR
 else
   error "Error detecting cached build: diff exited ${DIFF_STATUS}" | indent
 fi
@@ -345,7 +339,6 @@ fi
 if [ ! "$BUILD_DIR" = "/app" ]; then
   topic "Making build artifacts available to app"
   cp -r $APP_PREFIX $BUILD_DIR/$KONG_RUNTIME
-  echo "...copy $APP_PREFIX to $BUILD_DIR/$KONG_RUNTIME" | indent
 fi
 
 # run kong post-build if available
