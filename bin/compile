@@ -44,7 +44,7 @@ if [ -f "${ENV_DIR}/KONG_GIT_COMMITISH" ]
 then
   KONG_GIT_COMMITISH=`cat ${ENV_DIR}/KONG_GIT_COMMITISH`
 else
-  KONG_GIT_COMMITISH="2.0.3"
+  KONG_GIT_COMMITISH="2.7.0"
 fi
 
 KONG_SOURCE_DIR="${BP_CACHE_DIR}/kong-source"
@@ -55,7 +55,7 @@ KONG_SOURCE_DIR="${BP_CACHE_DIR}/kong-source"
 # If upgrading any those archives, then update the corresponding version here.
 LUAROCKS_VERSION=3.8.0
 OPENSSL_VERSION=1.1.1m
-OPENRESTY_VERSION=1.15.8.3
+OPENRESTY_VERSION=1.19.9.1
 GOLANG_VERSION=1.17.5
 
 function error() {
@@ -84,7 +84,6 @@ mkdir -p "$APT_STATE_DIR/lists/partial"
 APT_OPTIONS="-o debug::nolocking=true -o dir::cache=$APT_CACHE_DIR -o dir::state=$APT_STATE_DIR"
 
 topic "Updating apt caches"
-pwd
 apt-get $APT_OPTIONS update | indent
 
 for PACKAGE in $(cat $BP_DIR/Aptfile $BUILD_DIR/Aptfile); do
@@ -104,7 +103,6 @@ mkdir -p $BUILD_DIR/.apt
 
 for DEB in $(ls -1 $APT_CACHE_DIR/archives/*.deb); do
   topic "Installing $(basename $DEB)"
-  pwd
   dpkg -x $DEB $BUILD_DIR/.apt/
 done
 
@@ -147,12 +145,10 @@ export | grep -E -e ' (PATH|LD_LIBRARY_PATH|LIBRARY_PATH|INCLUDE_PATH|CPATH|CPPP
 VENDOR_CACHE_DIR=${BP_CACHE_DIR}/vendor
 mkdir -p ${VENDOR_CACHE_DIR}
 echo "Make vendor cache build to cache the build at: VENDOR_CACHE_DIR=$VENDOR_CACHE_DIR" | indent
-pwd
 
 # Detect changes in the vendor/ sources
 topic "Detecting changes in vendor/"
 cd ${VENDOR_DIR}
-pwd
 VENDOR_DIFF=${BP_CACHE_DIR}/.vendor-diff
 VENDOR_HASH=${BP_CACHE_DIR}/.vendor-hash
 VENDOR_HASH_NEW=${VENDOR_HASH}-new
@@ -201,27 +197,71 @@ then
 
   topic "Building OpenResty"
   tar -xf openresty-${OPENRESTY_VERSION}.tar.gz
+  
+  echo "...extract files from lua-kong-nginx-module.tar.gz"
+  tar -xf lua-kong-nginx-module.tar.gz
+
+  echo "...patching Openresty ${OPENRESTY_VERSION}" | indent
+  tar -xf openresty-patches.tar.gz
+
+  OPENRESTY_PATCHES_DIR=$VENDOR_CACHE_DIR/openresty-patches/
+
+  if [[ ! -d "$OPENRESTY_PATCHES_DIR/$OPENRESTY_VERSION" ]]; then
+      error "No patches for OpenResty $OPENRESTY_VERSION (missing directory $OPENRESTY_PATCHES_DIR/$OPENRESTY_VERSION)"
+  fi
+
+  pushd openresty-${OPENRESTY_VERSION}/bundle
+    if [ ! -f .patch_applied ]; then
+      for patch_file in $(ls -1 $OPENRESTY_PATCHES_DIR/$OPENRESTY_VERSION/*.patch); do
+        echo "- applying OpenResty patch $patch_file" | indent
+        patch -p1 < $patch_file \
+          || error "Failed to apply patch: $patch_file"
+      done
+
+      touch .patch_applied
+    fi
+
+    if [ ! -f .patch_applied ]; then
+        error "Missing .patch_applied file; some OpenResty patches may not have been applied"
+    fi
+  popd
+  
   cd openresty-${OPENRESTY_VERSION}
-  echo "Building OpenResty at$(pwd) with --prefix:$APP_PREFIX" | indent
-  ./configure --prefix=$APP_PREFIX --with-pcre-jit --with-http_realip_module --with-http_ssl_module --with-http_stub_status_module --with-http_v2_module --with-openssl=${VENDOR_CACHE_DIR}/openssl-${OPENSSL_VERSION}
+  ./configure --prefix=$APP_PREFIX \
+              --with-pcre-jit \
+              --with-pcre \
+              --with-http_ssl_module \
+              --with-http_realip_module \
+              --with-http_stub_status_module \
+              --with-http_v2_module \
+              --with-openssl=${VENDOR_CACHE_DIR}/openssl-${OPENSSL_VERSION} \
+              --add-module=$VENDOR_CACHE_DIR/lua-kong-nginx-module \
+              --add-module=$VENDOR_CACHE_DIR/lua-kong-nginx-module/stream
 
   make
   make install
   cd ..
+
+  echo "Installing library files for lua-kong-nginx-module" | indent
+  pushd $VENDOR_CACHE_DIR/lua-kong-nginx-module
+    make install LUA_LIB_DIR=$APP_PREFIX/lualib
+  popd
 
 
   topic "Building LuaRocks"
   tar -xf luarocks-${LUAROCKS_VERSION}.tar.gz
   cd luarocks-${LUAROCKS_VERSION}
    echo "Building LuaRocks at$(pwd) with --prefix:$APP_PREFIX" | indent
-  ./configure --prefix=${APP_PREFIX} --lua-suffix=jit --with-lua=${APP_PREFIX}/luajit --with-lua-include=${APP_PREFIX}/luajit/include/luajit-2.1
+  ./configure --prefix=${APP_PREFIX} \
+              --lua-suffix=jit \
+              --with-lua=${APP_PREFIX}/luajit \
+              --with-lua-include=${APP_PREFIX}/luajit/include/luajit-2.1
   make build
   make install
   cd ..
 
 
   topic "Caching build"
-  pwd
   mkdir -p $PREFIX_CACHE_DIR
   cp -Rf $APP_PREFIX/* $PREFIX_CACHE_DIR/
   echo "...build cached at$ (pwd)" | indent
@@ -232,7 +272,6 @@ else
 fi
 
 topic "Building Kong from ${KONG_GIT_URL}#${KONG_GIT_COMMITISH}"
-pwd
 # Move the unfortunately named `.luarocks` spec file so that it doesn't
 # interfere during CI. We're migrating Kong apps to use `Rockfile` instead.
 if [ -f "$BUILD_DIR/.luarocks" ]; then
@@ -245,13 +284,11 @@ if [ -d "$KONG_SOURCE_DIR" ]
 then
   cd $KONG_SOURCE_DIR
   echo "fetch kong into $KONG_SOURCE_DIR" | indent
-  pwd
   git fetch
   git fetch --tags
   git reset --hard $(git rev-list -n 1 $KONG_GIT_COMMITISH)
 else
   echo "clone kong into $KONG_SOURCE_DIR" | indent
-  pwd
   git clone $KONG_GIT_URL $KONG_SOURCE_DIR
   cd $KONG_SOURCE_DIR
   git checkout $KONG_GIT_COMMITISH
@@ -262,50 +299,37 @@ luarocks make ./kong-*.rockspec
 # Install Kong's dependencies via LuaRocks
 # (`--local` is required for this to do anything)
 echo "Install Kong's dependencies via LuaRocks" | indent
-pwd
 luarocks install --local ./kong-*.rockspec
 mkdir -p ${APP_PREFIX}/bin
 mv bin/* ${APP_PREFIX}/bin/
 
-RESTY_KONG_TLS_VERSION=0.0.6
-RESTY_KONG_TLS_GITHUB_URI=https://raw.githubusercontent.com/Kong/lua-kong-nginx-module
-RESTY_KONG_TLS_FILE_URI=$RESTY_KONG_TLS_GITHUB_URI/$RESTY_KONG_TLS_VERSION/lualib/resty/kong/tls.lua
-LUAROCKS_SHARE=/app/kong-runtime/share/lua/5.1
-mkdir -p $LUAROCKS_SHARE/resty/kong
-curl -sSL $RESTY_KONG_TLS_FILE_URI -o $LUAROCKS_SHARE/resty/kong/tls.lua
-
-topic "Downloading and installing golang"
-##download and install golang
-GO_URL=https://dl.google.com/go/go${GOLANG_VERSION}.linux-amd64.tar.gz
-curl $GO_URL -o go${GOLANG_VERSION}.linux-amd64.tar.gz
-tar -xz -f go${GOLANG_VERSION}.linux-amd64.tar.gz -C $APP_PREFIX
-go get github.com/Kong/go-pluginserver
-mkdir ${APP_PREFIX}/go-plugins
+# topic "Downloading and installing golang"
+# ##download and install golang
+# GO_URL=https://dl.google.com/go/go${GOLANG_VERSION}.linux-amd64.tar.gz
+# curl $GO_URL -o go${GOLANG_VERSION}.linux-amd64.tar.gz
+# tar -xz -f go${GOLANG_VERSION}.linux-amd64.tar.gz -C $APP_PREFIX
+# go get github.com/Kong/go-pluginserver
+# mkdir ${APP_PREFIX}/go-plugins
 
 
 topic "Installing Lua rocks specified in Rockfile"
 cd ${BUILD_DIR}
-pwd
 ${BP_DIR}/bin/install-luarocks
 
 topic "Enabling runtime configuration & processes"
 cd ${BP_DIR}
-pwd
 mkdir -p $BUILD_DIR/.profile.d
 mv .profile.d/* $BUILD_DIR/.profile.d
 echo "...copy .profile.d to $BUILD_DIR/.profile.d" | indent
 ls .profile.d
-pwd
 mkdir -p $BUILD_DIR/config
 mv config/* $BUILD_DIR/config
 echo "...move config/* to $BUILD_DIR/config" | indent
-pwd
 # Move executables for Procfile into place
 mkdir -p $BUILD_DIR/bin
 cp $BP_DIR/bin/app/heroku-* $BUILD_DIR/bin/
 echo "Move executables for Procfile into place" | indent
 echo "...copy $BP_DIR/bin/app/heroku-* to $BUILD_DIR/bin/" | indent
-pwd
 
 topic "Applying buildpack v6.0.0 backward-compatibility patch"
 if [ ! -d ".heroku" ]
@@ -332,4 +356,3 @@ if [[ -f $BUILD_DIR/bin/kong-post-build ]]; then
 fi
 
 echo "Buildpack compile success"
-pwd
