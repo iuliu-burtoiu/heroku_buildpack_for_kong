@@ -433,7 +433,7 @@ main() {
           if [ $DEBUG == 1 ]; then
             OPENSSL_OPTS+=('-d')
           fi
-
+        echo "Configuring OpenSsl with following options  ${OPENSSL_OPTS[*]}"
         eval ./config ${OPENSSL_OPTS[*]}
       fi
 
