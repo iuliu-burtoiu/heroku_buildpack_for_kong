@@ -13,12 +13,12 @@ pid pids/nginx.pid;
 error_log ${{PROXY_ERROR_LOG}} ${{LOG_LEVEL}};
 
 > if nginx_optimizations then
-worker_rlimit_nofile ${{WORKER_RLIMIT}};
+worker_rlimit_nofile auto;
 > end
 
 events {
 > if nginx_optimizations then
-    worker_connections ${{WORKER_CONNECTIONS}};
+    worker_connections auto;
     multi_accept on;
 > end
 }
